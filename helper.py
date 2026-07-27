@@ -30,10 +30,13 @@ def fetch_stats(selected_user,df):
     return num_messages,len(words),num_media_messages,len(links)
 
 def most_busy_users(df):
+    if df.empty:
+        return pd.Series(dtype='int64'), pd.DataFrame(columns=['name', 'percent'])
     x = df['user'].value_counts().head()
-    df = round((df['user'].value_counts() / df.shape[0]) * 100, 2).reset_index().rename(
-        columns={'index': 'name', 'user': 'percent'})
-    return x,df
+    pct_series = round((df['user'].value_counts() / df.shape[0]) * 100, 2)
+    new_df = pct_series.reset_index()
+    new_df.columns = ['name', 'percent']
+    return x, new_df
 
 def create_wordcloud(selected_user,df):
 
@@ -54,8 +57,15 @@ def create_wordcloud(selected_user,df):
         return " ".join(y)
 
     wc = WordCloud(width=500,height=500,min_font_size=10,background_color='white')
-    temp['message'] = temp['message'].apply(remove_stop_words)
-    df_wc = wc.generate(temp['message'].str.cat(sep=" "))
+    if temp.empty:
+        return wc.generate("NoData")
+
+    temp_messages = temp['message'].apply(remove_stop_words)
+    text = temp_messages.str.cat(sep=" ").strip()
+    if not text:
+        text = "NoWordsFound"
+
+    df_wc = wc.generate(text)
     return df_wc
 
 def most_common_words(selected_user,df):
@@ -76,7 +86,11 @@ def most_common_words(selected_user,df):
             if word not in stop_words:
                 words.append(word)
 
-    most_common_df = pd.DataFrame(Counter(words).most_common(20))
+    counts = Counter(words).most_common(20)
+    if not counts:
+        return pd.DataFrame(columns=[0, 1])
+
+    most_common_df = pd.DataFrame(counts)
     return most_common_df
 
 def emoji_helper(selected_user,df):
@@ -84,17 +98,24 @@ def emoji_helper(selected_user,df):
         df = df[df['user'] == selected_user]
 
     emojis = []
+    emoji_dict = getattr(emoji, 'EMOJI_DATA', getattr(emoji, 'UNICODE_EMOJI', {}).get('en', {}))
     for message in df['message']:
-        emojis.extend([c for c in message if c in emoji.UNICODE_EMOJI['en']])
+        emojis.extend([c for c in message if c in emoji_dict])
 
-    emoji_df = pd.DataFrame(Counter(emojis).most_common(len(Counter(emojis))))
+    counts = Counter(emojis).most_common()
+    if not counts:
+        return pd.DataFrame(columns=[0, 1])
 
+    emoji_df = pd.DataFrame(counts)
     return emoji_df
 
 def monthly_timeline(selected_user,df):
 
     if selected_user != 'Overall':
         df = df[df['user'] == selected_user]
+
+    if df.empty:
+        return pd.DataFrame(columns=['year', 'month_num', 'month', 'message', 'time'])
 
     timeline = df.groupby(['year', 'month_num', 'month']).count()['message'].reset_index()
 
@@ -110,6 +131,9 @@ def daily_timeline(selected_user,df):
 
     if selected_user != 'Overall':
         df = df[df['user'] == selected_user]
+
+    if df.empty:
+        return pd.DataFrame(columns=['only_date', 'message'])
 
     daily_timeline = df.groupby('only_date').count()['message'].reset_index()
 
@@ -133,6 +157,9 @@ def activity_heatmap(selected_user,df):
 
     if selected_user != 'Overall':
         df = df[df['user'] == selected_user]
+
+    if df.empty:
+        return pd.DataFrame()
 
     user_heatmap = df.pivot_table(index='day_name', columns='period', values='message', aggfunc='count').fillna(0)
 

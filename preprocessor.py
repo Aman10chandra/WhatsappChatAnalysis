@@ -2,31 +2,47 @@ import re
 import pandas as pd
 
 def preprocess(data):
-    pattern = r'\d{1,2}/\d{1,2}/\d{2,4},\s\d{1,2}:\d{2}\s-\s'
+    data = data.lstrip('\ufeff')
+    pattern = r'(\[\d{1,2}[/\.-]\d{1,2}[/\.-]\d{2,4},\s\d{1,2}:\d{2}(?::\d{2})?(?:[\s\u202f]?[ap]\.?m\.?)?\]\s?|\d{1,2}[/\.-]\d{1,2}[/\.-]\d{2,4},\s\d{1,2}:\d{2}(?::\d{2})?(?:[\s\u202f]?[ap]\.?m\.?)?\s?-\s?)'
 
-    messages = re.split(pattern, data)[1:]
-    dates = re.findall(pattern, data)
+    parts = re.split(pattern, data, flags=re.IGNORECASE)
+    if len(parts) < 3:
+        return pd.DataFrame()
+
+    dates = parts[1::2]
+    messages = parts[2::2]
 
     df = pd.DataFrame({'user_message': messages, 'message_date': dates})
-    # convert message_date type
-    df['message_date'] = pd.to_datetime(df['message_date'], format='%d/%m/%Y, %H:%M - ')
 
-    df.rename(columns={'message_date': 'date'}, inplace=True)
+    cleaned_dates = (
+        df['message_date']
+        .str.replace('\u202f', ' ', regex=False)
+        .str.replace('[', '', regex=False)
+        .str.replace(']', '', regex=False)
+        .str.strip(' -')
+        .str.strip()
+    )
+
+    df['date'] = pd.to_datetime(cleaned_dates, format='mixed', dayfirst=True, errors='coerce')
+    df = df.dropna(subset=['date']).reset_index(drop=True)
+
+    if df.empty:
+        return pd.DataFrame()
 
     users = []
-    messages = []
+    cleaned_messages = []
     for message in df['user_message']:
-        entry = re.split(r'([\w\W]+?):\s', message)
-        if entry[1:]:  # user name
+        entry = re.split(r'([\w\W]+?):\s', message, maxsplit=1)
+        if len(entry) > 1:
             users.append(entry[1])
-            messages.append(" ".join(entry[2:]))
+            cleaned_messages.append(entry[2])
         else:
             users.append('group_notification')
-            messages.append(entry[0])
+            cleaned_messages.append(entry[0])
 
     df['user'] = users
-    df['message'] = messages
-    df.drop(columns=['user_message'], inplace=True)
+    df['message'] = cleaned_messages
+    df.drop(columns=['user_message', 'message_date'], inplace=True)
 
     df['only_date'] = df['date'].dt.date
     df['year'] = df['date'].dt.year
@@ -38,7 +54,7 @@ def preprocess(data):
     df['minute'] = df['date'].dt.minute
 
     period = []
-    for hour in df[['day_name', 'hour']]['hour']:
+    for hour in df['hour']:
         if hour == 23:
             period.append(str(hour) + "-" + str('00'))
         elif hour == 0:
